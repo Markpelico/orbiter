@@ -64,7 +64,8 @@ def parse_advisory(raw: bytes) -> MaxDeliveriesAdvisory | None:
         data = json.loads(raw)
     except (json.JSONDecodeError, UnicodeDecodeError):
         return None
-    if data.get("type") != _ADVISORY_TYPE:
+    # json.loads(b"0") is a perfectly valid int — found by Hypothesis in CI.
+    if not isinstance(data, dict) or data.get("type") != _ADVISORY_TYPE:
         return None
     try:
         return MaxDeliveriesAdvisory(

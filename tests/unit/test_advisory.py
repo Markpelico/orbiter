@@ -45,6 +45,12 @@ def test_rejects_non_numeric_sequence() -> None:
     assert parse_advisory(make_advisory(stream_seq="not-a-number")) is None
 
 
+def test_rejects_valid_json_that_is_not_an_object() -> None:
+    """Regression: Hypothesis found b"0" in CI — valid JSON, not a dict."""
+    for raw in (b"0", b'"advisory"', b"[1, 2]", b"null", b"true"):
+        assert parse_advisory(raw) is None
+
+
 @given(st.binary(max_size=200))
 def test_arbitrary_bytes_never_crash_the_parser(raw: bytes) -> None:
     """The advisory subject is broker-controlled, but the parser still treats
