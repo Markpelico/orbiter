@@ -23,9 +23,17 @@ async def create_pool(database_url: str) -> asyncpg.Pool:
     return await asyncpg.create_pool(database_url, min_size=1, max_size=10)
 
 
+# Every service applies the schema at startup, concurrently. CREATE TABLE IF
+# NOT EXISTS is NOT concurrency-safe: two sessions can both see "not exists"
+# and collide in the catalog (pg_type_typname_nsp_index). An advisory lock
+# serializes the DDL; the xact variant releases itself at commit.
+_SCHEMA_LOCK_KEY = 0x0_5B17E5  # arbitrary, must simply be unique to ORBITER
+
+
 async def apply_schema(pool: asyncpg.Pool) -> None:
     schema = (resources.files("orbiter.db") / "schema.sql").read_text(encoding="utf-8")
-    async with pool.acquire() as conn:
+    async with pool.acquire() as conn, conn.transaction():
+        await conn.execute("SELECT pg_advisory_xact_lock($1)", _SCHEMA_LOCK_KEY)
         await conn.execute(schema)
 
 

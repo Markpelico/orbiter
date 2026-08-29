@@ -14,7 +14,9 @@ and graceful shutdown.
 
 ## Status
 
-**Phase 1–2 (in progress):** walking skeleton + survival mechanics.
+**Phases 0–2 complete:** walking skeleton + survival mechanics, proven end to end
+against real NATS JetStream, Postgres, and Valkey in CI. **Phase 3 next:** EKS,
+KEDA scale-to-zero, Karpenter spot fleet, load curves.
 
 - [x] Event-sourced job state machine, property-tested (no illegal transition is representable)
 - [x] Idempotent submission (`Idempotency-Key`, Stripe semantics) and idempotent execution
@@ -24,7 +26,8 @@ and graceful shutdown.
 - [x] Bounded admission control — 429 + `Retry-After`, rejection over buffering
 - [x] Worker with graceful SIGTERM shutdown; retries with backoff; permanent-failure handling
 - [x] End-to-end integration suite against real NATS JetStream, Postgres, and Valkey
-- [ ] Dead-letter queue + inspect/replay endpoint (Phase 2)
+- [x] Durable dead-letter path: poison jobs quarantined via captured max-deliveries
+      advisories, inspectable at `GET /dlq`, replayable by operator action (ADR-0006)
 - [ ] KEDA scale-to-zero + Karpenter spot fleet on EKS (Phase 3)
 - [ ] OpenTelemetry → Grafana LGTM with exemplars; SLO burn-rate alerts (Phase 4)
 - [ ] Chaos Mesh: pod kill, network partition, TimeChaos clock skew (Phase 5)
