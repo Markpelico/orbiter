@@ -1,0 +1,71 @@
+# Local ORBITER stack. `docker compose up -d --build`, then:
+#   curl -X POST localhost:8000/jobs -H 'Idempotency-Key: demo-1' \
+#        -H 'Content-Type: application/json' -d '{"duration_ms": 2000}'
+services:
+  nats:
+    image: nats:2.10-alpine
+    command: ["-js", "-m", "8222"]
+    ports:
+      - "4222:4222"
+      - "8222:8222" # monitoring endpoint (KEDA reads this later)
+
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: orbiter
+      POSTGRES_PASSWORD: orbiter
+      POSTGRES_DB: orbiter
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U orbiter"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+
+  valkey:
+    image: valkey/valkey:8-alpine
+    ports:
+      - "6379:6379"
+
+  api:
+    build: .
+    command:
+      ["uvicorn", "orbiter.api.app:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000"]
+    environment: &env
+      ORBITER_DATABASE_URL: postgresql://orbiter:orbiter@postgres:5432/orbiter
+      ORBITER_NATS_URL: nats://nats:4222
+      ORBITER_VALKEY_URL: redis://valkey:6379/0
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      nats:
+        condition: service_started
+
+  relay:
+    build: .
+    command: ["python", "-m", "orbiter.relay.outbox_relay"]
+    environment: *env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      nats:
+        condition: service_started
+
+  worker:
+    build: .
+    command: ["python", "-m", "orbiter.worker.main"]
+    environment: *env
+    # SIGTERM grace: compose default is 10s; give the worker room to finish.
+    stop_grace_period: 30s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      nats:
+        condition: service_started
+      valkey:
+        condition: service_started
+    deploy:
+      replicas: 2

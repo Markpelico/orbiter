@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.hypothesis/
+
+# Terraform
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!example.tfvars
+
+# Local env
+.env
+.env.*
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Results working files (charts are committed, raw dumps are not)
+results/raw/
