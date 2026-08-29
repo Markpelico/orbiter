@@ -1,0 +1,182 @@
+"""Postgres repository. All multi-row invariants live inside transactions here.
+
+State changes go through the domain state machine before touching the jobs
+table, so an illegal transition can never be recorded — the audit trail stays
+an audit trail.
+"""
+
+from __future__ import annotations
+
+import json
+import uuid
+from importlib import resources
+from typing import Any
+
+import asyncpg
+
+from orbiter.domain.model import EventType, JobEvent, JobState
+from orbiter.domain.state_machine import apply
+from orbiter.leases.fencing import StaleLeaseError
+
+
+async def create_pool(database_url: str) -> asyncpg.Pool:
+    return await asyncpg.create_pool(database_url, min_size=1, max_size=10)
+
+
+async def apply_schema(pool: asyncpg.Pool) -> None:
+    schema = (resources.files("orbiter.db") / "schema.sql").read_text(encoding="utf-8")
+    async with pool.acquire() as conn:
+        await conn.execute(schema)
+
+
+async def submit_job(
+    pool: asyncpg.Pool,
+    idempotency_key: str,
+    payload: dict[str, Any],
+    subject: str,
+) -> tuple[uuid.UUID, bool]:
+    """Insert job + SUBMITTED/ENQUEUED events + outbox row in one transaction.
+
+    Returns (job_id, created). If the idempotency key was seen before, returns
+    the existing job with created=False — Stripe semantics.
+    """
+    job_id = uuid.uuid4()
+    payload_json = json.dumps(payload)
+    async with pool.acquire() as conn, conn.transaction():
+        inserted = await conn.fetchval(
+            """
+            INSERT INTO jobs (id, idempotency_key, payload, state)
+            VALUES ($1, $2, $3::jsonb, $4)
+            ON CONFLICT (idempotency_key) DO NOTHING
+            RETURNING id
+            """,
+            job_id,
+            idempotency_key,
+            payload_json,
+            JobState.QUEUED.value,
+        )
+        if inserted is None:
+            existing = await conn.fetchval(
+                "SELECT id FROM jobs WHERE idempotency_key = $1", idempotency_key
+            )
+            return existing, False
+        await conn.executemany(
+            "INSERT INTO job_events (job_id, event) VALUES ($1, $2)",
+            [(job_id, EventType.SUBMITTED.value), (job_id, EventType.ENQUEUED.value)],
+        )
+        message = json.dumps({"job_id": str(job_id), "payload": payload})
+        await conn.execute(
+            "INSERT INTO outbox (job_id, subject, payload) VALUES ($1, $2, $3::jsonb)",
+            job_id,
+            subject,
+            message,
+        )
+    return job_id, True
+
+
+async def get_job(pool: asyncpg.Pool, job_id: uuid.UUID) -> dict[str, Any] | None:
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT id, idempotency_key, payload, state, attempts, result,
+                   created_at, updated_at
+            FROM jobs WHERE id = $1
+            """,
+            job_id,
+        )
+        if row is None:
+            return None
+        events = await conn.fetch(
+            "SELECT event, attempt, detail, at FROM job_events WHERE job_id = $1 ORDER BY id",
+            job_id,
+        )
+    return {
+        "id": str(row["id"]),
+        "state": row["state"],
+        "payload": json.loads(row["payload"]),
+        "attempts": row["attempts"],
+        "result": json.loads(row["result"]) if row["result"] else None,
+        "created_at": row["created_at"].isoformat(),
+        "updated_at": row["updated_at"].isoformat(),
+        "events": [
+            {
+                "event": e["event"],
+                "attempt": e["attempt"],
+                "detail": json.loads(e["detail"]),
+                "at": e["at"].isoformat(),
+            }
+            for e in events
+        ],
+    }
+
+
+async def record_event(
+    pool: asyncpg.Pool,
+    job_id: uuid.UUID,
+    event: EventType,
+    attempt: int = 0,
+    detail: dict[str, Any] | None = None,
+    fence_token: int | None = None,
+    result: dict[str, Any] | None = None,
+) -> JobState:
+    """Validate the transition, append the event, refresh the projection.
+
+    When ``fence_token`` is given, the jobs-table UPDATE carries the fencing
+    check in its WHERE clause: an older token matches zero rows and the whole
+    transaction rolls back with StaleLeaseError. This is the write-site half
+    of the fenced lease.
+    """
+    async with pool.acquire() as conn, conn.transaction():
+        row = await conn.fetchrow(
+            "SELECT state, attempts, fence_token FROM jobs WHERE id = $1 FOR UPDATE", job_id
+        )
+        if row is None:
+            raise LookupError(f"job {job_id} not found")
+        current = JobState(row["state"])
+        next_state = apply(current, event)  # raises IllegalTransition
+        token = fence_token if fence_token is not None else row["fence_token"]
+        updated = await conn.fetchval(
+            """
+            UPDATE jobs
+            SET state = $2,
+                attempts = GREATEST(attempts, $3),
+                fence_token = $4,
+                result = COALESCE($5::jsonb, result),
+                updated_at = now()
+            WHERE id = $1 AND fence_token <= $4
+            RETURNING id
+            """,
+            job_id,
+            next_state.value,
+            attempt,
+            token,
+            json.dumps(result) if result is not None else None,
+        )
+        if updated is None:
+            raise StaleLeaseError(str(job_id), token, row["fence_token"])
+        await conn.execute(
+            "INSERT INTO job_events (job_id, event, attempt, detail) "
+            "VALUES ($1, $2, $3, $4::jsonb)",
+            job_id,
+            event.value,
+            attempt,
+            json.dumps(detail or {}),
+        )
+    return next_state
+
+
+async def replay_events(pool: asyncpg.Pool, job_id: uuid.UUID) -> list[JobEvent]:
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT event, attempt, detail, at FROM job_events WHERE job_id = $1 ORDER BY id",
+            job_id,
+        )
+    return [
+        JobEvent(
+            type=EventType(r["event"]),
+            attempt=r["attempt"],
+            detail=json.loads(r["detail"]),
+            at=r["at"],
+        )
+        for r in rows
+    ]
