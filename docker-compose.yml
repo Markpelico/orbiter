@@ -54,6 +54,16 @@ services:
       nats:
         condition: service_started
 
+  dlq:
+    build: .
+    command: ["python", "-m", "orbiter.dlq.listener"]
+    environment: *env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      nats:
+        condition: service_started
+
   worker:
     build: .
     command: ["python", "-m", "orbiter.worker.main"]

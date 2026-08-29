@@ -23,11 +23,16 @@ from pydantic import BaseModel, Field
 from orbiter.api.admission import AdmissionController
 from orbiter.config import Settings
 from orbiter.db import repo
+from orbiter.domain.model import JobState
+from orbiter.domain.state_machine import IllegalTransition
 
 
 class SubmitRequest(BaseModel):
     duration_ms: int = Field(ge=0, le=600_000)
     failure_rate: float = Field(default=0.0, ge=0.0, le=1.0)
+    # Simulates a job that kills its worker before any handling can run —
+    # the poison-message path. Exists so the DLQ quarantine is demonstrable.
+    poison: bool = False
 
 
 class SubmitResponse(BaseModel):
@@ -100,6 +105,30 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if job is None:
             raise HTTPException(status_code=404, detail="no such job")
         return job
+
+    @app.get("/dlq")
+    async def dlq(pool: Annotated[asyncpg.Pool, Depends(get_pool)]) -> list[dict[str, Any]]:
+        """Inspect quarantined jobs."""
+        return await repo.list_jobs_by_state(pool, JobState.DEAD_LETTER)
+
+    @app.post("/jobs/{job_id}/replay")
+    async def replay(
+        job_id: str, pool: Annotated[asyncpg.Pool, Depends(get_pool)]
+    ) -> dict[str, str]:
+        """Operator re-injection of a dead-lettered job."""
+        try:
+            parsed = uuid.UUID(job_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="job_id must be a UUID") from exc
+        try:
+            state = await repo.replay_job(pool, parsed, cfg.subject_jobs)
+        except IllegalTransition as exc:
+            raise HTTPException(
+                status_code=409, detail=f"only dead-lettered jobs can be replayed: {exc}"
+            ) from exc
+        if state is None:
+            raise HTTPException(status_code=404, detail="no such job")
+        return {"id": job_id, "state": state.value}
 
     @app.get("/healthz")
     async def healthz(pool: Annotated[asyncpg.Pool, Depends(get_pool)]) -> dict[str, str]:

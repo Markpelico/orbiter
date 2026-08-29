@@ -110,6 +110,52 @@ async def get_job(pool: asyncpg.Pool, job_id: uuid.UUID) -> dict[str, Any] | Non
     }
 
 
+async def _apply_event(
+    conn: asyncpg.Connection,
+    job_id: uuid.UUID,
+    event: EventType,
+    attempt: int,
+    detail: dict[str, Any] | None,
+    fence_token: int | None,
+    result: dict[str, Any] | None,
+) -> JobState:
+    row = await conn.fetchrow(
+        "SELECT state, attempts, fence_token FROM jobs WHERE id = $1 FOR UPDATE", job_id
+    )
+    if row is None:
+        raise LookupError(f"job {job_id} not found")
+    current = JobState(row["state"])
+    next_state = apply(current, event)  # raises IllegalTransition
+    token = fence_token if fence_token is not None else row["fence_token"]
+    updated = await conn.fetchval(
+        """
+        UPDATE jobs
+        SET state = $2,
+            attempts = GREATEST(attempts, $3),
+            fence_token = $4,
+            result = COALESCE($5::jsonb, result),
+            updated_at = now()
+        WHERE id = $1 AND fence_token <= $4
+        RETURNING id
+        """,
+        job_id,
+        next_state.value,
+        attempt,
+        token,
+        json.dumps(result) if result is not None else None,
+    )
+    if updated is None:
+        raise StaleLeaseError(str(job_id), token, row["fence_token"])
+    await conn.execute(
+        "INSERT INTO job_events (job_id, event, attempt, detail) VALUES ($1, $2, $3, $4::jsonb)",
+        job_id,
+        event.value,
+        attempt,
+        json.dumps(detail or {}),
+    )
+    return next_state
+
+
 async def record_event(
     pool: asyncpg.Pool,
     job_id: uuid.UUID,
@@ -127,42 +173,46 @@ async def record_event(
     of the fenced lease.
     """
     async with pool.acquire() as conn, conn.transaction():
-        row = await conn.fetchrow(
-            "SELECT state, attempts, fence_token FROM jobs WHERE id = $1 FOR UPDATE", job_id
-        )
+        return await _apply_event(conn, job_id, event, attempt, detail, fence_token, result)
+
+
+async def replay_job(pool: asyncpg.Pool, job_id: uuid.UUID, subject: str) -> JobState | None:
+    """Operator replay of a dead-lettered job: REPLAYED event + a fresh outbox
+    row, in one transaction. Returns None if the job does not exist; raises
+    IllegalTransition if it is not in DEAD_LETTER."""
+    async with pool.acquire() as conn, conn.transaction():
+        row = await conn.fetchrow("SELECT payload::text AS payload FROM jobs WHERE id = $1", job_id)
         if row is None:
-            raise LookupError(f"job {job_id} not found")
-        current = JobState(row["state"])
-        next_state = apply(current, event)  # raises IllegalTransition
-        token = fence_token if fence_token is not None else row["fence_token"]
-        updated = await conn.fetchval(
-            """
-            UPDATE jobs
-            SET state = $2,
-                attempts = GREATEST(attempts, $3),
-                fence_token = $4,
-                result = COALESCE($5::jsonb, result),
-                updated_at = now()
-            WHERE id = $1 AND fence_token <= $4
-            RETURNING id
-            """,
-            job_id,
-            next_state.value,
-            attempt,
-            token,
-            json.dumps(result) if result is not None else None,
-        )
-        if updated is None:
-            raise StaleLeaseError(str(job_id), token, row["fence_token"])
+            return None
+        state = await _apply_event(conn, job_id, EventType.REPLAYED, 0, None, None, None)
+        message = json.dumps({"job_id": str(job_id), "payload": json.loads(row["payload"])})
         await conn.execute(
-            "INSERT INTO job_events (job_id, event, attempt, detail) "
-            "VALUES ($1, $2, $3, $4::jsonb)",
+            "INSERT INTO outbox (job_id, subject, payload) VALUES ($1, $2, $3::jsonb)",
             job_id,
-            event.value,
-            attempt,
-            json.dumps(detail or {}),
+            subject,
+            message,
         )
-    return next_state
+    return state
+
+
+async def list_jobs_by_state(pool: asyncpg.Pool, state: JobState) -> list[dict[str, Any]]:
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT id, payload::text AS payload, attempts, updated_at
+            FROM jobs WHERE state = $1 ORDER BY updated_at DESC LIMIT 200
+            """,
+            state.value,
+        )
+    return [
+        {
+            "id": str(r["id"]),
+            "payload": json.loads(r["payload"]),
+            "attempts": r["attempts"],
+            "updated_at": r["updated_at"].isoformat(),
+        }
+        for r in rows
+    ]
 
 
 async def replay_events(pool: asyncpg.Pool, job_id: uuid.UUID) -> list[JobEvent]:

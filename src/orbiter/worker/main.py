@@ -106,6 +106,16 @@ class Worker:
         attempt = int(msg.metadata.num_delivered)
         delivery = f"{self.worker_id}:{attempt}"
 
+        if payload.get("poison"):
+            # Simulates a message that kills its worker before any handling
+            # runs: from the broker's point of view the delivery just vanishes
+            # (no ack, no term). Redelivery counts toward MaxDeliver; when it
+            # is exhausted, the max-deliveries advisory fires and the DLQ
+            # listener quarantines the job.
+            log.warning("job %s is poison: dying without acking (attempt %d)", job_id, attempt)
+            await msg.nak()
+            return
+
         claim = await guard.try_claim(str(job_id), delivery)
         if claim is ClaimResult.ALREADY_DONE:
             log.info("job %s already done; acking duplicate delivery", job_id)

@@ -15,6 +15,10 @@ class Settings(BaseSettings):
     stream_name: str = "ORBITER_JOBS"
     subject_jobs: str = "orbiter.jobs"
     consumer_durable: str = "workers"
+    dlq_stream_name: str = "ORBITER_DLQ"
+    subject_dlq: str = "orbiter.dlq"
+    advisory_stream_name: str = "ORBITER_ADVISORIES"
+    dlq_consumer_durable: str = "dlq-listener"
     # At-least-once knobs: how long a delivery stays invisible before redelivery,
     # and how many deliveries before the broker gives up and we dead-letter.
     ack_wait_s: int = 30
