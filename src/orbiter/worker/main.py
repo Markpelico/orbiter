@@ -50,6 +50,10 @@ async def ensure_stream(js: Any, settings: Settings) -> None:
                 ack_policy=AckPolicy.EXPLICIT,
                 ack_wait=settings.ack_wait_s,
                 max_deliver=settings.max_deliver,
+                # Must match what pull_subscribe binds with, or the client
+                # sees a config mismatch and may edit the consumer underneath
+                # its own redelivery state.
+                filter_subject=settings.subject_jobs,
             ),
         )
 
@@ -111,9 +115,17 @@ class Worker:
             # runs: from the broker's point of view the delivery just vanishes
             # (no ack, no term). Redelivery counts toward MaxDeliver; when it
             # is exhausted, the max-deliveries advisory fires and the DLQ
-            # listener quarantines the job.
-            log.warning("job %s is poison: dying without acking (attempt %d)", job_id, attempt)
-            await msg.nak()
+            # listener quarantines the job. The nak carries an explicit small
+            # delay: an instant nak can race the server's pending-request
+            # bookkeeping, a scheduled one cannot.
+            log.warning(
+                "job %s is poison: dying without acking (delivery %d/%d, pending=%s)",
+                job_id,
+                attempt,
+                settings.max_deliver,
+                msg.metadata.num_pending,
+            )
+            await msg.nak(delay=0.5)
             return
 
         claim = await guard.try_claim(str(job_id), delivery)

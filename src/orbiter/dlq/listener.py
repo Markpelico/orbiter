@@ -98,6 +98,7 @@ async def ensure_streams(js: Any, settings: Settings) -> None:
             ConsumerConfig(
                 durable_name=settings.dlq_consumer_durable,
                 ack_policy=AckPolicy.EXPLICIT,
+                filter_subject=advisory_subject(settings.stream_name, settings.consumer_durable),
             ),
         )
 
@@ -151,6 +152,7 @@ async def run(settings: Settings, stop: asyncio.Event) -> None:
                 continue
             for msg in msgs:
                 adv = parse_advisory(msg.data)
+                log.info("advisory received: %s", adv)
                 if adv is not None:
                     try:
                         await quarantine(js, pool, settings, adv)
