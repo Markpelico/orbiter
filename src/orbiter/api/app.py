@@ -6,7 +6,10 @@ The submit transaction writes the job, its first two events, and the outbox
 row atomically — the dual-write problem is solved here or nowhere.
 """
 
-from __future__ import annotations
+# NOTE: no `from __future__ import annotations` here. Stringified annotations
+# break FastAPI's dependency resolution for closures defined inside
+# create_app: `Depends(get_pool)` lives in the factory's local scope, which
+# get_type_hints cannot see, and the params silently degrade to query params.
 
 import uuid
 from collections.abc import AsyncIterator

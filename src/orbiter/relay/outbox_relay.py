@@ -77,7 +77,9 @@ async def run(settings: Settings, stop: asyncio.Event) -> None:
                 with contextlib.suppress(TimeoutError):
                     await asyncio.wait_for(stop.wait(), timeout=settings.relay_poll_interval_s)
     finally:
-        await nc.drain()
+        # Publishes are individually awaited (js.publish waits for the ack),
+        # so there is nothing pending to drain at shutdown.
+        await nc.close()
         await pool.close()
 
 

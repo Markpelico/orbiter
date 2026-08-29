@@ -20,10 +20,10 @@ requires_docker = pytest.mark.skipif(not _HAS_DOCKER, reason="Docker is not avai
 def stack() -> Iterator[Settings]:
     if not _HAS_DOCKER:
         pytest.skip("Docker is not available")
+    from testcontainers.community.postgres import PostgresContainer
+    from testcontainers.community.redis import RedisContainer
     from testcontainers.core.container import DockerContainer
     from testcontainers.core.waiting_utils import wait_for_logs
-    from testcontainers.postgres import PostgresContainer
-    from testcontainers.redis import RedisContainer
 
     with (
         PostgresContainer("postgres:17-alpine") as pg,

@@ -88,8 +88,11 @@ class Worker:
                 for msg in msgs:
                     await self.process(msg, pool, guard, leases)
         finally:
-            log.info("worker %s draining", self.worker_id)
-            await nc.drain()
+            # close(), not drain(): a pull consumer has nothing to drain —
+            # fetches are explicit, the in-flight job was already awaited, and
+            # nats-py's drain can hang forever on pull subscriptions.
+            log.info("worker %s closing", self.worker_id)
+            await nc.close()
             await kv.aclose()
             await pool.close()
 
