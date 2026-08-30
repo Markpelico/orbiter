@@ -28,8 +28,12 @@ KEDA scale-to-zero, Karpenter spot fleet, load curves.
 - [x] End-to-end integration suite against real NATS JetStream, Postgres, and Valkey
 - [x] Durable dead-letter path: poison jobs quarantined via captured max-deliveries
       advisories, inspectable at `GET /dlq`, replayable by operator action (ADR-0006)
-- [ ] KEDA scale-to-zero + Karpenter spot fleet on EKS (Phase 3)
-- [ ] OpenTelemetry → Grafana LGTM with exemplars; SLO burn-rate alerts (Phase 4)
+- [x] KEDA scale-to-zero + Karpenter fleet on EKS — proven live: 21/21 jobs, 0→4→0
+      workers, nodes bought and sold, 65s cold start measured; the free-plan account
+      refused the spot market and the on-demand fallback pool absorbed it by design
+- [x] OpenTelemetry end to end: ONE trace per job across api → relay → worker (context
+      rides inside the message), RED metrics, Grafana + Tempo + Prometheus in compose
+- [ ] SLO burn-rate alerts, exemplars, k6 load curves (Phase 4 continues)
 - [ ] Chaos Mesh: pod kill, network partition, TimeChaos clock skew (Phase 5)
 - [ ] Supply chain: SBOM, Trivy gate, cosign signing, Kyverno admission (Phase 6)
 
