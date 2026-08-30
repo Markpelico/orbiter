@@ -25,6 +25,7 @@ from orbiter.config import Settings
 from orbiter.db import repo
 from orbiter.domain.model import JobState
 from orbiter.domain.state_machine import IllegalTransition
+from orbiter.telemetry import init_telemetry, meter
 
 
 class SubmitRequest(BaseModel):
@@ -43,6 +44,14 @@ class SubmitResponse(BaseModel):
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     cfg = settings or Settings()
+    init_telemetry("orbiter-api", cfg.otel_endpoint)
+    m = meter()
+    jobs_submitted = m.create_counter(
+        "orbiter.jobs.submitted", description="Jobs accepted by the API"
+    )
+    admission_rejected = m.create_counter(
+        "orbiter.admission.rejected", description="Submissions rejected with 429"
+    )
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -76,6 +85,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         admission: Annotated[AdmissionController, Depends(get_admission)],
     ) -> SubmitResponse:
         if not admission.try_acquire():
+            admission_rejected.add(1)
             raise HTTPException(
                 status_code=429,
                 detail="submission capacity exceeded; retry later",
@@ -90,6 +100,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             )
         finally:
             admission.release()
+        jobs_submitted.add(1, {"created": created})
         response.status_code = 201 if created else 200
         return SubmitResponse(id=str(job_id), state="queued", created=created)
 
@@ -135,5 +146,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         async with pool.acquire() as conn:
             await conn.fetchval("SELECT 1")
         return {"status": "ok"}
+
+    if cfg.otel_endpoint:
+        from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+
+        FastAPIInstrumentor.instrument_app(app, exclude_spans=["receive", "send"])
 
     return app

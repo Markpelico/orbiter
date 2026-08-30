@@ -14,6 +14,9 @@ dependencies = [
     "redis>=5.0",
     "pydantic>=2.8",
     "pydantic-settings>=2.4",
+    "opentelemetry-sdk>=1.27",
+    "opentelemetry-exporter-otlp-proto-http>=1.27",
+    "opentelemetry-instrumentation-fastapi>=0.48b0",
 ]
 
 [dependency-groups]
@@ -49,7 +52,7 @@ files = ["src", "tests"]
 python_version = "3.13"
 
 [[tool.mypy.overrides]]
-module = ["asyncpg.*", "nats.*", "testcontainers.*"]
+module = ["asyncpg.*", "nats.*", "testcontainers.*", "opentelemetry.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

@@ -26,6 +26,7 @@ from orbiter.db import repo
 from orbiter.domain.model import EventType
 from orbiter.kv.valkey import ValkeyKV
 from orbiter.leases.fencing import LeaseManager, StaleLeaseError
+from orbiter.telemetry import context_from, init_telemetry, meter, tracer
 from orbiter.worker.executor import SimulatedFailure, execute
 from orbiter.worker.idempotency import ClaimResult, ExecutionGuard
 
@@ -64,6 +65,19 @@ class Worker:
         self.worker_id = f"{socket.gethostname()}-{uuid.uuid4().hex[:8]}"
         self.shutdown = asyncio.Event()
         self.rng = random.Random()
+        m = meter()
+        self.jobs_completed = m.create_counter(
+            "orbiter.jobs.completed", description="Jobs finished successfully"
+        )
+        self.jobs_requeued = m.create_counter(
+            "orbiter.jobs.requeued", description="Retryable failures sent back to the queue"
+        )
+        self.jobs_failed = m.create_counter(
+            "orbiter.jobs.failed", description="Jobs failed permanently (retries exhausted)"
+        )
+        self.job_duration_ms = m.create_histogram(
+            "orbiter.job.duration", unit="ms", description="Successful job execution time"
+        )
 
     async def run(self) -> None:
         settings = self.settings
@@ -103,13 +117,37 @@ class Worker:
     async def process(
         self, msg: Any, pool: Any, guard: ExecutionGuard, leases: LeaseManager
     ) -> None:
-        settings = self.settings
         data = json.loads(msg.data)
         job_id = uuid.UUID(data["job_id"])
         payload = data["payload"]
         attempt = int(msg.metadata.num_delivered)
         delivery = f"{self.worker_id}:{attempt}"
+        # Resume the job's trace from the NATS headers the relay injected —
+        # this span joins the same trace as the original HTTP submit.
+        ctx = context_from(dict(msg.headers) if msg.headers else None)
+        with tracer().start_as_current_span(
+            "job.process",
+            context=ctx,
+            attributes={
+                "orbiter.job_id": str(job_id),
+                "orbiter.attempt": attempt,
+                "orbiter.worker_id": self.worker_id,
+            },
+        ):
+            await self.handle(msg, pool, guard, leases, job_id, payload, attempt, delivery)
 
+    async def handle(
+        self,
+        msg: Any,
+        pool: Any,
+        guard: ExecutionGuard,
+        leases: LeaseManager,
+        job_id: uuid.UUID,
+        payload: dict[str, Any],
+        attempt: int,
+        delivery: str,
+    ) -> None:
+        settings = self.settings
         if payload.get("poison"):
             # Simulates a message that kills its worker before any handling
             # runs: from the broker's point of view the delivery just vanishes
@@ -161,6 +199,10 @@ class Worker:
             )
             await guard.mark_done(str(job_id), delivery)
             await msg.ack()
+            self.jobs_completed.add(1)
+            elapsed = result["elapsed_ms"]
+            if isinstance(elapsed, int):
+                self.job_duration_ms.record(elapsed)
             log.info("job %s succeeded on attempt %d", job_id, attempt)
         except SimulatedFailure as exc:
             if attempt < settings.max_deliver:
@@ -174,6 +216,7 @@ class Worker:
                 )
                 await guard.release_claim(str(job_id), delivery)
                 await msg.nak(delay=min(2**attempt, 30))
+                self.jobs_requeued.add(1)
                 log.warning("job %s failed attempt %d; requeued", job_id, attempt)
             else:
                 await repo.record_event(
@@ -186,6 +229,7 @@ class Worker:
                 )
                 await guard.release_claim(str(job_id), delivery)
                 await msg.term()
+                self.jobs_failed.add(1)
                 log.error("job %s failed permanently after %d attempts", job_id, attempt)
         except StaleLeaseError:
             # A newer holder owns this job now; our writes were rejected at the
@@ -201,7 +245,9 @@ class Worker:
 
 async def amain() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
-    worker = Worker(Settings())
+    settings = Settings()
+    init_telemetry("orbiter-worker", settings.otel_endpoint)
+    worker = Worker(settings)
     loop = asyncio.get_running_loop()
     with contextlib.suppress(NotImplementedError):  # signals unavailable on Windows
         loop.add_signal_handler(signal.SIGTERM, worker.request_shutdown)

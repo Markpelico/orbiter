@@ -1,0 +1,26 @@
+# Tempo, single binary, local storage. The trace backend for the demo:
+# search by service or orbiter.job_id, see one trace spanning
+# api -> relay -> worker across the table and the broker.
+server:
+  http_listen_port: 3200
+
+distributor:
+  receivers:
+    otlp:
+      protocols:
+        http:
+          endpoint: 0.0.0.0:4318
+        grpc:
+          endpoint: 0.0.0.0:4317
+
+storage:
+  trace:
+    backend: local
+    local:
+      path: /var/tempo/blocks
+    wal:
+      path: /var/tempo/wal
+
+compactor:
+  compaction:
+    block_retention: 24h

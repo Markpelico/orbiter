@@ -40,6 +40,7 @@ from orbiter.config import Settings
 from orbiter.db import repo
 from orbiter.domain.model import EventType
 from orbiter.domain.state_machine import IllegalTransition
+from orbiter.telemetry import context_from, init_telemetry, meter, tracer
 
 log = logging.getLogger("orbiter.dlq")
 
@@ -103,10 +104,34 @@ async def ensure_streams(js: Any, settings: Settings) -> None:
         )
 
 
+_quarantined = meter().create_counter(
+    "orbiter.jobs.quarantined", description="Poison jobs moved to the DLQ"
+)
+
+
 async def quarantine(js: Any, pool: Any, settings: Settings, adv: MaxDeliveriesAdvisory) -> None:
     raw = await js.get_msg(settings.stream_name, adv.stream_seq)
     body = json.loads(raw.data)
     job_id = uuid.UUID(body["job_id"])
+    # The poisoned message still carries its submit-time traceparent, so the
+    # quarantine appears in the SAME trace as the original HTTP submit.
+    with tracer().start_as_current_span(
+        "dlq.quarantine",
+        context=context_from(body.get("traceparent")),
+        attributes={"orbiter.job_id": str(job_id), "orbiter.deliveries": adv.deliveries},
+    ):
+        await _quarantine_inner(js, pool, settings, adv, raw, job_id)
+    _quarantined.add(1)
+
+
+async def _quarantine_inner(
+    js: Any,
+    pool: Any,
+    settings: Settings,
+    adv: MaxDeliveriesAdvisory,
+    raw: Any,
+    job_id: uuid.UUID,
+) -> None:
     # Copy before delete, always: the DLQ publish is deduped by msg-id, so
     # crashing and re-running this block is safe at every point.
     await js.publish(
@@ -170,12 +195,14 @@ async def run(settings: Settings, stop: asyncio.Event) -> None:
 
 async def amain() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
+    settings = Settings()
+    init_telemetry("orbiter-dlq", settings.otel_endpoint)
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
     with contextlib.suppress(NotImplementedError):
         loop.add_signal_handler(signal.SIGTERM, stop.set)
         loop.add_signal_handler(signal.SIGINT, stop.set)
-    await run(Settings(), stop)
+    await run(settings, stop)
 
 
 if __name__ == "__main__":

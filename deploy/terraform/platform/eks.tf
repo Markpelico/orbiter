@@ -73,10 +73,6 @@ module "eks" {
   }
 }
 
-# The EBS CSI controller can be scheduled onto ANY node, so both node roles
-# (system group + Karpenter nodes) carry the policy. IRSA/pod-identity scoping
-# is the tighter production answer; this is the pragmatic portfolio one.
-resource "aws_iam_role_policy_attachment" "system_nodes_ebs_csi" {
-  role       = module.eks.eks_managed_node_groups["system"].iam_role_name
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy"
-}
+# (EBS CSI credentials: see ebs_csi.tf — Pod Identity, not node roles.
+# Node-role policy attachments were dead weight: the IMDS hop limit stops
+# pods from using them anyway.)

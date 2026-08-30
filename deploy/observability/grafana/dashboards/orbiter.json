@@ -1,0 +1,75 @@
+{
+  "title": "ORBITER",
+  "uid": "orbiter-red",
+  "timezone": "browser",
+  "refresh": "5s",
+  "time": { "from": "now-15m", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Job throughput (per second)",
+      "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 },
+      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] },
+      "targets": [
+        { "expr": "sum(rate(orbiter_jobs_submitted_total[1m]))", "legendFormat": "submitted" },
+        { "expr": "sum(rate(orbiter_jobs_completed_total[1m]))", "legendFormat": "completed" },
+        { "expr": "sum(rate(orbiter_jobs_requeued_total[1m]))", "legendFormat": "requeued" },
+        { "expr": "sum(rate(orbiter_jobs_failed_total[1m]))", "legendFormat": "failed" }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Job duration p50 / p95 / p99",
+      "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 },
+      "fieldConfig": { "defaults": { "unit": "ms" }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(orbiter_job_duration_milliseconds_bucket[2m])) by (le))",
+          "legendFormat": "p50"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(orbiter_job_duration_milliseconds_bucket[2m])) by (le))",
+          "legendFormat": "p95"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum(rate(orbiter_job_duration_milliseconds_bucket[2m])) by (le))",
+          "legendFormat": "p99"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Backpressure: 429 rejections",
+      "gridPos": { "x": 0, "y": 8, "w": 12, "h": 7 },
+      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "sum(rate(orbiter_admission_rejected_total[1m]))",
+          "legendFormat": "rejected (429)"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Completed",
+      "gridPos": { "x": 12, "y": 8, "w": 6, "h": 7 },
+      "targets": [{ "expr": "sum(orbiter_jobs_completed_total)" }]
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Quarantined (DLQ)",
+      "gridPos": { "x": 18, "y": 8, "w": 6, "h": 7 },
+      "fieldConfig": {
+        "defaults": { "thresholds": { "steps": [{ "color": "green" }, { "color": "red", "value": 1 }] } },
+        "overrides": []
+      },
+      "targets": [{ "expr": "sum(orbiter_jobs_quarantined_total) or vector(0)" }]
+    }
+  ],
+  "schemaVersion": 39
+}

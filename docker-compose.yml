@@ -36,6 +36,7 @@ services:
       ORBITER_DATABASE_URL: postgresql://orbiter:orbiter@postgres:5432/orbiter
       ORBITER_NATS_URL: nats://nats:4222
       ORBITER_VALKEY_URL: redis://valkey:6379/0
+      ORBITER_OTEL_ENDPOINT: http://otel-collector:4318
     ports:
       - "8000:8000"
     depends_on:
@@ -64,6 +65,48 @@ services:
       nats:
         condition: service_started
 
+  # --- Observability (local LGTM-lite: collector -> Tempo + Prometheus,
+  # Grafana on top; images unpinned on purpose — local dev only, never CI) ---
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    command: ["--config=/etc/otel-collector.yaml"]
+    volumes:
+      - ./deploy/observability/otel-collector.yaml:/etc/otel-collector.yaml:ro
+    depends_on:
+      - tempo
+
+  tempo:
+    image: grafana/tempo:latest
+    command: ["-config.file=/etc/tempo.yaml"]
+    user: root # local dev only: skip volume permission ceremony
+    volumes:
+      - ./deploy/observability/tempo.yaml:/etc/tempo.yaml:ro
+      - tempo-data:/var/tempo
+    ports:
+      - "3200:3200"
+
+  prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      - ./deploy/observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+
+  grafana:
+    image: grafana/grafana:latest
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+    volumes:
+      - ./deploy/observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./deploy/observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+      - tempo
+
   worker:
     build: .
     command: ["python", "-m", "orbiter.worker.main"]
@@ -79,3 +122,6 @@ services:
         condition: service_started
     deploy:
       replicas: 2
+
+volumes:
+  tempo-data:

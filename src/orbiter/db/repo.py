@@ -17,6 +17,7 @@ import asyncpg
 from orbiter.domain.model import EventType, JobEvent, JobState
 from orbiter.domain.state_machine import apply
 from orbiter.leases.fencing import StaleLeaseError
+from orbiter.telemetry import current_carrier
 
 
 async def create_pool(database_url: str) -> asyncpg.Pool:
@@ -72,7 +73,11 @@ async def submit_job(
             "INSERT INTO job_events (job_id, event) VALUES ($1, $2)",
             [(job_id, EventType.SUBMITTED.value), (job_id, EventType.ENQUEUED.value)],
         )
-        message = json.dumps({"job_id": str(job_id), "payload": payload})
+        # The trace context rides in the message itself: it is the only
+        # vehicle that survives the trip through a table and a broker.
+        message = json.dumps(
+            {"job_id": str(job_id), "payload": payload, "traceparent": current_carrier()}
+        )
         await conn.execute(
             "INSERT INTO outbox (job_id, subject, payload) VALUES ($1, $2, $3::jsonb)",
             job_id,

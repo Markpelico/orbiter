@@ -39,3 +39,7 @@ class Settings(BaseSettings):
     # Idempotent execution guard
     exec_guard_ttl_s: int = 3600
     lease_ttl_s: int = 30
+
+    # Observability. Empty endpoint = telemetry entirely off (tests, local
+    # scripts). Point at an OTLP/HTTP collector to light it up.
+    otel_endpoint: str = ""

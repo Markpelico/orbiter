@@ -1,0 +1,31 @@
+# One collector, two pipelines: traces to Tempo, metrics to a Prometheus
+# scrape endpoint. The app ships everything OTLP/HTTP to :4318 and knows
+# nothing about what sits behind the collector — swapping Tempo for an AWS
+# backend later is a collector change, not an app change.
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+      grpc:
+        endpoint: 0.0.0.0:4317
+
+processors:
+  batch: {}
+
+exporters:
+  otlphttp/tempo:
+    endpoint: http://tempo:4318
+  prometheus:
+    endpoint: 0.0.0.0:8889
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlphttp/tempo]
+    metrics:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [prometheus]

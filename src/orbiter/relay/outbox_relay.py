@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import logging
 import signal
 
@@ -25,6 +26,7 @@ import nats
 
 from orbiter.config import Settings
 from orbiter.db import repo
+from orbiter.telemetry import context_from, current_carrier, init_telemetry, tracer
 from orbiter.worker.main import ensure_stream
 
 log = logging.getLogger("orbiter.relay")
@@ -48,11 +50,23 @@ async def relay_once(pool: object, js: object, settings: Settings) -> int:
             settings.relay_batch_size,
         )
         for row in rows:
-            await js.publish(  # type: ignore[attr-defined]
-                row["subject"],
-                row["payload"].encode(),
-                headers={"Nats-Msg-Id": f"outbox-{row['id']}"},
-            )
+            # Resume the trace the API started (traceparent embedded in the
+            # message), then re-inject so the worker can pick it up from the
+            # NATS headers — the context's third vehicle on this trip.
+            body = json.loads(row["payload"])
+            ctx = context_from(body.get("traceparent"))
+            with tracer().start_as_current_span(
+                "relay.publish",
+                context=ctx,
+                attributes={"orbiter.job_id": str(body.get("job_id", ""))},
+            ):
+                headers = {"Nats-Msg-Id": f"outbox-{row['id']}"}
+                headers.update(current_carrier())
+                await js.publish(  # type: ignore[attr-defined]
+                    row["subject"],
+                    row["payload"].encode(),
+                    headers=headers,
+                )
         if rows:
             await conn.execute(
                 "UPDATE outbox SET published_at = now() WHERE id = ANY($1::bigint[])",
@@ -85,12 +99,14 @@ async def run(settings: Settings, stop: asyncio.Event) -> None:
 
 async def amain() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
+    settings = Settings()
+    init_telemetry("orbiter-relay", settings.otel_endpoint)
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
     with contextlib.suppress(NotImplementedError):
         loop.add_signal_handler(signal.SIGTERM, stop.set)
         loop.add_signal_handler(signal.SIGINT, stop.set)
-    await run(Settings(), stop)
+    await run(settings, stop)
 
 
 if __name__ == "__main__":

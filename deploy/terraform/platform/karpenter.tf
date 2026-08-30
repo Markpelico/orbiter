@@ -15,10 +15,6 @@ module "karpenter" {
   # Deterministic name: deploy/k8s/karpenter/nodeclass.yaml references it.
   node_iam_role_name            = "${var.name}-karpenter-node"
   node_iam_role_use_name_prefix = false
-  node_iam_role_additional_policies = {
-    # EBS CSI may schedule onto Karpenter-managed nodes; see eks.tf note.
-    ebs_csi = "arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy"
-  }
 
   queue_name = "${var.name}-karpenter-interruption"
 }
