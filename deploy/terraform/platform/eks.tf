@@ -14,6 +14,21 @@ module "eks" {
   endpoint_public_access                   = true
   enable_cluster_creator_admin_permissions = true
 
+  # IAM authentication is not Kubernetes authorization: the CI role could
+  # assume itself into AWS all day and still be a stranger to the cluster.
+  # This access entry is what lets the deploy workflow run kubectl.
+  access_entries = {
+    ci = {
+      principal_arn = "arn:aws:iam::907797501994:role/orbiter-ci"
+      policy_associations = {
+        admin = {
+          policy_arn   = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+          access_scope = { type = "cluster" }
+        }
+      }
+    }
+  }
+
   # before_compute on the networking addons, or the cluster deadlocks on
   # first boot: the module installs addons AFTER the node group by default,
   # but a node cannot go Ready without the CNI — so the node group waits on
