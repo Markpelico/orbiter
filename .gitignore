@@ -32,3 +32,4 @@ tfplan
 # terraform apply session logs
 apply.log
 apply.log.err
+destroy.log
