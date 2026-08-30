@@ -2,23 +2,24 @@
 
 Everything ORBITER runs on is provisioned here; there is no click-ops path.
 
-Planned module layout:
-
 ```
-bootstrap/   # one-time: state bucket + lock table, GitHub OIDC role
-network/     # VPC, subnets, endpoints
-cluster/     # EKS, Karpenter (spot-first NodePools + on-demand fallback),
-             # KEDA, interruption queue
-data/        # RDS Postgres, ElastiCache (Valkey), S3 artifacts bucket
-observability/ # LGTM stack, OpenCost, Chaos Mesh
+bootstrap/   # APPLIED. One-time foundation: versioned+encrypted S3 state
+             # bucket (S3-lockfile locking, no DynamoDB), GitHub OIDC provider
+             # + orbiter-ci role (trusts exactly repo main branch — CI deploys
+             # with zero stored cloud keys), monthly gross-usage budget alarm
+             # (credits excluded on purpose: it fires on consumption pace,
+             # not on what happened to be free). Local state, by design.
+platform/    # NEXT. VPC, EKS, Karpenter (spot-first NodePools + on-demand
+             # fallback, interruption queue), KEDA, RDS Postgres, ElastiCache
+             # (Valkey), artifacts bucket. S3 backend in the bootstrap bucket.
+observability/ # LATER. LGTM stack, OpenCost, Chaos Mesh.
 ```
 
 Ground rules:
 
 - `make up` / `make down` build and destroy the entire platform; nothing is
-  precious. Short-lived clusters are the cost-control strategy.
+  precious. Short-lived clusters are the cost-control strategy — the EKS
+  control plane bills ~$0.10/hour, so it exists only during build/demo
+  sessions.
 - CI authenticates via GitHub OIDC; no long-lived cloud keys exist anywhere.
-- Every PR gets an Infracost comment before merge.
-
-Nothing in this directory is applied yet — it lands in Phase 3 alongside an
-AWS account with the free-tier credits ($100–200 for new accounts as of 2026).
+- The bootstrap stack is the only long-lived one, and it rounds to $0/month.

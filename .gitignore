@@ -25,3 +25,6 @@ Thumbs.db
 
 # Results working files (charts are committed, raw dumps are not)
 results/raw/
+
+# Terraform plan files
+tfplan
