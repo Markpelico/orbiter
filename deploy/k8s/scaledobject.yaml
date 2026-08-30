@@ -20,5 +20,9 @@ spec:
         stream: "ORBITER_JOBS"
         consumer: "workers"
         lagThreshold: "5"
-        activationLagThreshold: "1"
+        # 0, not 1: KEDA activates only when lag EXCEEDS this value, and a
+        # single requeued job landing after scale-down produced exactly
+        # lag=1 — stranded forever below the wake-up line. Found live on
+        # first cloud run: one job, queued, fleet asleep.
+        activationLagThreshold: "0"
         useHttps: "false"
