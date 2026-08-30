@@ -10,9 +10,7 @@ partition, and clocks skew. It exists to demonstrate — with charts, traces, an
 experiments — *why* distributed systems need idempotency, backpressure, fencing tokens,
 and graceful shutdown.
 
-> I built continuous integration for ISS simulation models at NASA on a single machine.
-> ORBITER is that problem rebuilt at fleet scale: a spot-instance worker fleet that scales
-> on queue depth, survives losing nodes mid-run, and chaos-tests itself every night.
+![The ORBITER board: pipeline, scale-to-zero, chaos drill, effectively-once mechanisms, one trace per job, and the measured numbers](docs/assets/orbiter-board.png)
 
 ## Status
 
