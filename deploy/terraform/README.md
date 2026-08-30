@@ -9,9 +9,14 @@ bootstrap/   # APPLIED. One-time foundation: versioned+encrypted S3 state
              # with zero stored cloud keys), monthly gross-usage budget alarm
              # (credits excluded on purpose: it fires on consumption pace,
              # not on what happened to be free). Local state, by design.
-platform/    # NEXT. VPC, EKS, Karpenter (spot-first NodePools + on-demand
-             # fallback, interruption queue), KEDA, RDS Postgres, ElastiCache
-             # (Valkey), artifacts bucket. S3 backend in the bootstrap bucket.
+platform/    # WRITTEN, plan-verified (96 resources), NOT YET APPLIED.
+             # VPC (single NAT), EKS 1.34 + 2x t3.medium system nodes,
+             # Karpenter 1.14 (spot-first NodePools + on-demand fallback +
+             # SQS interruption queue), KEDA 2.20, RDS Postgres 17,
+             # ElastiCache Valkey 8, ECR, artifacts bucket. S3 backend in
+             # the bootstrap bucket. App manifests in ../../k8s (kustomize),
+             # deployed by the manual `deploy` workflow via OIDC.
+             # `make up` starts the ~$0.30/hr meter; `make down` stops it.
 observability/ # LATER. LGTM stack, OpenCost, Chaos Mesh.
 ```
 

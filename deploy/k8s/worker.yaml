@@ -1,0 +1,38 @@
+# The worker fleet. Replicas are OWNED BY KEDA (scaledobject.yaml): 0 when
+# the queue is empty, up to 16 under load. The nodeSelector pins workers to
+# Karpenter-provisioned (spot-first) capacity so the system nodes stay
+# reserved for controllers — and so killing a worker NODE in the chaos demo
+# never takes the control plane down with it.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker
+  namespace: orbiter
+spec:
+  replicas: 0 # KEDA scales this; 0 is the resting state
+  selector:
+    matchLabels:
+      app: worker
+  template:
+    metadata:
+      labels:
+        app: worker
+    spec:
+      nodeSelector:
+        orbiter/pool: workers
+      # SIGTERM contract: finish or hand off the in-flight job inside this
+      # window. Spot reclamation gives 120s; we promise 40.
+      terminationGracePeriodSeconds: 40
+      containers:
+        - name: worker
+          image: orbiter:latest
+          command: ["python", "-m", "orbiter.worker.main"]
+          envFrom:
+            - secretRef:
+                name: orbiter-config
+          env:
+            - name: ORBITER_SHUTDOWN_GRACE_S
+              value: "35"
+          resources:
+            requests: { cpu: 500m, memory: 256Mi }
+            limits: { memory: 512Mi }

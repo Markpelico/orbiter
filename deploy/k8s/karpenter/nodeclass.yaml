@@ -1,0 +1,17 @@
+# WHAT Karpenter is allowed to buy: Amazon Linux 2023 nodes, placed in the
+# subnets and security groups tagged karpenter.sh/discovery=orbiter, wearing
+# the node IAM role Terraform created (deterministic name, see karpenter.tf).
+apiVersion: karpenter.k8s.aws/v1
+kind: EC2NodeClass
+metadata:
+  name: workers
+spec:
+  amiSelectorTerms:
+    - alias: al2023@latest
+  role: orbiter-karpenter-node
+  subnetSelectorTerms:
+    - tags:
+        karpenter.sh/discovery: orbiter
+  securityGroupSelectorTerms:
+    - tags:
+        karpenter.sh/discovery: orbiter

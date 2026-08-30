@@ -1,0 +1,50 @@
+name: deploy
+
+# Manually triggered on purpose: the platform is disposable and usually DOWN.
+# Run this only while `make up` has a cluster standing.
+on:
+  workflow_dispatch:
+
+permissions:
+  id-token: write # OIDC: the runner proves "repo Markpelico/orbiter, branch main"
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  AWS_ROLE_ARN: arn:aws:iam::907797501994:role/orbiter-ci
+  ECR_REPO: 907797501994.dkr.ecr.us-east-1.amazonaws.com/orbiter
+  CLUSTER: orbiter
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Assume the CI role via OIDC (no stored keys anywhere)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Fail fast if the platform is down
+        run: |
+          aws eks describe-cluster --name "$CLUSTER" --query cluster.status --output text \
+            || { echo "::error::cluster '$CLUSTER' does not exist - run 'make up' first"; exit 1; }
+
+      - name: Build and push image
+        run: |
+          aws ecr get-login-password | docker login --username AWS --password-stdin "${ECR_REPO%/*}"
+          docker build -t "$ECR_REPO:${{ github.sha }}" -t "$ECR_REPO:latest" .
+          docker push "$ECR_REPO:${{ github.sha }}"
+          docker push "$ECR_REPO:latest"
+
+      - name: Deploy manifests
+        run: |
+          aws eks update-kubeconfig --name "$CLUSTER" --region "$AWS_REGION"
+          kubectl apply -f deploy/k8s/karpenter/
+          cd deploy/k8s && kustomize edit set image "orbiter=$ECR_REPO:${{ github.sha }}" && cd ../..
+          kubectl apply -k deploy/k8s
+          kubectl -n orbiter rollout status deploy/api --timeout=180s
+          kubectl -n orbiter rollout status deploy/relay --timeout=120s
+          kubectl -n orbiter rollout status deploy/dlq --timeout=120s

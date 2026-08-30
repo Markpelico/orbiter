@@ -1,0 +1,74 @@
+# Two pools, spot-first with on-demand fallback — the industry-standard
+# pattern. Karpenter tries the weight-100 spot pool; if spot capacity is
+# unavailable it falls back to on-demand rather than leaving pods pending.
+# Both pools label their nodes orbiter/pool=workers, which is the only
+# thing the worker Deployment's nodeSelector asks for.
+apiVersion: karpenter.sh/v1
+kind: NodePool
+metadata:
+  name: workers-spot
+spec:
+  weight: 100
+  template:
+    metadata:
+      labels:
+        orbiter/pool: workers
+    spec:
+      nodeClassRef:
+        group: karpenter.k8s.aws
+        kind: EC2NodeClass
+        name: workers
+      requirements:
+        - key: karpenter.sh/capacity-type
+          operator: In
+          values: ["spot"]
+        - key: kubernetes.io/arch
+          operator: In
+          values: ["amd64"]
+        - key: karpenter.k8s.aws/instance-category
+          operator: In
+          values: ["c", "m"]
+        - key: karpenter.k8s.aws/instance-size
+          operator: In
+          values: ["medium", "large", "xlarge"]
+      expireAfter: 24h
+  disruption:
+    consolidationPolicy: WhenEmptyOrUnderutilized
+    consolidateAfter: 30s
+  limits:
+    cpu: "32" # hard cost ceiling: the fleet can never exceed 32 vCPUs
+---
+apiVersion: karpenter.sh/v1
+kind: NodePool
+metadata:
+  name: workers-fallback
+spec:
+  weight: 10
+  template:
+    metadata:
+      labels:
+        orbiter/pool: workers
+    spec:
+      nodeClassRef:
+        group: karpenter.k8s.aws
+        kind: EC2NodeClass
+        name: workers
+      requirements:
+        - key: karpenter.sh/capacity-type
+          operator: In
+          values: ["on-demand"]
+        - key: kubernetes.io/arch
+          operator: In
+          values: ["amd64"]
+        - key: karpenter.k8s.aws/instance-category
+          operator: In
+          values: ["c", "m"]
+        - key: karpenter.k8s.aws/instance-size
+          operator: In
+          values: ["medium", "large"]
+      expireAfter: 24h
+  disruption:
+    consolidationPolicy: WhenEmptyOrUnderutilized
+    consolidateAfter: 30s
+  limits:
+    cpu: "8"

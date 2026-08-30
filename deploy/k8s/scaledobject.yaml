@@ -1,0 +1,24 @@
+# KEDA watches JetStream consumer lag through the NATS monitoring endpoint
+# and sizes the worker Deployment: 0 when idle, 16 at full tilt.
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: worker
+  namespace: orbiter
+spec:
+  scaleTargetRef:
+    name: worker
+  minReplicaCount: 0
+  maxReplicaCount: 16
+  pollingInterval: 5
+  cooldownPeriod: 60 # empty queue for 60s -> back to zero
+  triggers:
+    - type: nats-jetstream
+      metadata:
+        natsServerMonitoringEndpoint: "nats.orbiter.svc.cluster.local:8222"
+        account: "$G"
+        stream: "ORBITER_JOBS"
+        consumer: "workers"
+        lagThreshold: "5"
+        activationLagThreshold: "1"
+        useHttps: "false"

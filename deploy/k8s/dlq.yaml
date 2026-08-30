@@ -1,0 +1,25 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dlq
+  namespace: orbiter
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: dlq
+  template:
+    metadata:
+      labels:
+        app: dlq
+    spec:
+      containers:
+        - name: dlq
+          image: orbiter:latest
+          command: ["python", "-m", "orbiter.dlq.listener"]
+          envFrom:
+            - secretRef:
+                name: orbiter-config
+          resources:
+            requests: { cpu: 50m, memory: 192Mi }
+            limits: { memory: 384Mi }

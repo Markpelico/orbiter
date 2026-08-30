@@ -1,0 +1,16 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: orbiter
+resources:
+  - nats.yaml
+  - api.yaml
+  - relay.yaml
+  - dlq.yaml
+  - worker.yaml
+  - scaledobject.yaml
+# karpenter/ is applied separately (cluster-scoped, and the CRDs only exist
+# after the Karpenter helm release): kubectl apply -f deploy/k8s/karpenter/
+images:
+  - name: orbiter
+    newName: 907797501994.dkr.ecr.us-east-1.amazonaws.com/orbiter
+    newTag: latest
