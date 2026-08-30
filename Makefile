@@ -52,6 +52,17 @@ status:
 port-forward:
 	kubectl -n orbiter port-forward svc/api 8000:8000
 
+# Load test against the local compose stack (3 min, 6 rate windows), then
+# render the RESULTS.md charts from the summary + Prometheus.
+load:
+	docker run --rm --network orbiter_default \
+	  -v ./deploy/load:/scripts grafana/k6 run \
+	  --summary-export /scripts/summary.json /scripts/submit.js
+
+charts:
+	uv run scripts/make_charts.py --summary deploy/load/summary.json \
+	  --start $(START) --end $(END)
+
 api:
 	uv run uvicorn orbiter.api.app:create_app --factory --host 0.0.0.0 --port 8000
 

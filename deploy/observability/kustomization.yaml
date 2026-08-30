@@ -1,0 +1,36 @@
+# The cloud cockpit, generated from the SAME config files the local compose
+# stack mounts — one source of truth, no drift. The kustomization root sits
+# here (not under deploy/k8s/) because kustomize's load restriction requires
+# generator files inside the root.
+#
+# Apply on a running platform: kubectl apply -k deploy/observability
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: orbiter
+resources:
+  - k8s/collector.yaml
+  - k8s/tempo.yaml
+  - k8s/prometheus.yaml
+  - k8s/grafana.yaml
+configMapGenerator:
+  - name: otel-collector-config
+    files:
+      - otel-collector.yaml
+  - name: tempo-config
+    files:
+      - tempo.yaml
+  - name: prometheus-config
+    files:
+      - prometheus.yml
+  - name: prometheus-rules
+    files:
+      - prometheus-rules.yml
+  - name: grafana-datasources
+    files:
+      - grafana/provisioning/datasources/datasources.yaml
+  - name: grafana-dashboard-provider
+    files:
+      - grafana/provisioning/dashboards/provider.yaml
+  - name: grafana-dashboards
+    files:
+      - grafana/dashboards/orbiter.json

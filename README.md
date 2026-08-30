@@ -95,7 +95,22 @@ uv run ruff check src tests && uv run mypy
 
 ## Measurements
 
-Every claim in this README will be backed by a chart in [`RESULTS.md`](RESULTS.md) as the
-phases land: throughput vs. fleet size, latency knees, recovery time per failure class,
-naive-lock-vs-fenced-lease under clock skew, cold-start breakdown, and cost per 1,000 jobs
-with scale-to-zero on vs. off — including the runs that came out badly.
+Every claim in this README is backed by an entry in [`RESULTS.md`](RESULTS.md) —
+including the runs that come out badly. First curves, from a 16k-job load test
+against the local stack:
+
+![Submit latency vs offered load](results/latency-vs-load.png)
+
+The submit path (one transaction: job + audit events + outbox row) holds
+single-digit-millisecond latency to 200 submissions/second.
+
+![Throughput during the load test](results/throughput-timeline.png)
+
+Two fixed workers plateau at ~19 jobs/s while offered load climbs to 200/s; the
+durable queue absorbs the difference without losing a job. That flat orange
+line is the whole argument for queue-depth autoscaling — on EKS, KEDA turns it
+into a rising one.
+
+Still to come: the same curves on the cloud fleet, recovery time per failure
+class, naive-lock-vs-fenced-lease under clock skew, cold-start breakdown, and
+cost per 1,000 jobs with scale-to-zero on vs. off.

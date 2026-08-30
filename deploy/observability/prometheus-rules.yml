@@ -1,0 +1,69 @@
+# ORBITER SLO: 99% of finished jobs succeed (permanent failures burn budget;
+# retries are free — they are the system working as designed).
+#
+# Alerts use the Google SRE multiwindow burn-rate pattern: page only when the
+# error budget is burning fast enough to matter AND the short window agrees
+# (so a recovered spike self-clears). With a 1% budget: 14.4x burn exhausts
+# a 30-day budget in ~2 days (page); 3x in ~10 days (ticket).
+groups:
+  - name: orbiter-slo
+    interval: 15s
+    rules:
+      # Recording rules: the error ratio at each window the alerts need.
+      - record: orbiter:job_error_ratio:rate5m
+        expr: |
+          sum(rate(orbiter_jobs_failed_total[5m]))
+          / clamp_min(sum(rate(orbiter_jobs_completed_total[5m])) + sum(rate(orbiter_jobs_failed_total[5m])), 1e-10)
+      - record: orbiter:job_error_ratio:rate30m
+        expr: |
+          sum(rate(orbiter_jobs_failed_total[30m]))
+          / clamp_min(sum(rate(orbiter_jobs_completed_total[30m])) + sum(rate(orbiter_jobs_failed_total[30m])), 1e-10)
+      - record: orbiter:job_error_ratio:rate1h
+        expr: |
+          sum(rate(orbiter_jobs_failed_total[1h]))
+          / clamp_min(sum(rate(orbiter_jobs_completed_total[1h])) + sum(rate(orbiter_jobs_failed_total[1h])), 1e-10)
+      - record: orbiter:job_error_ratio:rate6h
+        expr: |
+          sum(rate(orbiter_jobs_failed_total[6h]))
+          / clamp_min(sum(rate(orbiter_jobs_completed_total[6h])) + sum(rate(orbiter_jobs_failed_total[6h])), 1e-10)
+
+      - alert: OrbiterErrorBudgetFastBurn
+        expr: |
+          orbiter:job_error_ratio:rate1h > (14.4 * 0.01)
+          and orbiter:job_error_ratio:rate5m > (14.4 * 0.01)
+        for: 2m
+        labels:
+          severity: page
+        annotations:
+          summary: "Job error budget burning 14x too fast"
+          description: "Permanent job failures are consuming the 30-day error budget in ~2 days. See RUNBOOK.md#fast-burn."
+
+      - alert: OrbiterErrorBudgetSlowBurn
+        expr: |
+          orbiter:job_error_ratio:rate6h > (3 * 0.01)
+          and orbiter:job_error_ratio:rate30m > (3 * 0.01)
+        for: 15m
+        labels:
+          severity: ticket
+        annotations:
+          summary: "Job error budget burning 3x too fast"
+          description: "Sustained elevated permanent failures. See RUNBOOK.md#slow-burn."
+
+      - alert: OrbiterDLQGrowth
+        expr: increase(orbiter_jobs_quarantined_total[15m]) > 0
+        labels:
+          severity: ticket
+        annotations:
+          summary: "Poison jobs are being quarantined"
+          description: "The DLQ received new jobs. Inspect GET /dlq and replay after fixing the cause. See RUNBOOK.md#dlq."
+
+      - alert: OrbiterQueueStalled
+        expr: |
+          sum(rate(orbiter_jobs_submitted_total[10m])) > 0
+          and sum(rate(orbiter_jobs_completed_total[10m])) == 0
+        for: 10m
+        labels:
+          severity: page
+        annotations:
+          summary: "Jobs are being accepted but none are finishing"
+          description: "Submissions flow while completions are zero: fleet asleep (activation dead zone?), workers crash-looping, or broker trouble. See RUNBOOK.md#stalled."
