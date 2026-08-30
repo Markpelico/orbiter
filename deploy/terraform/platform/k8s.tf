@@ -17,7 +17,10 @@ resource "kubernetes_secret_v1" "orbiter_config" {
   }
 
   data = {
-    ORBITER_DATABASE_URL = "postgresql://orbiter:${random_password.db.result}@${aws_db_instance.postgres.address}:5432/orbiter"
+    # urlencode is load-bearing: the generated password contains URL
+    # metacharacters (?, &, <, =...) and a DSN is a URL — an unencoded ?
+    # turns the rest of the password into a phantom query string.
+    ORBITER_DATABASE_URL = "postgresql://orbiter:${urlencode(random_password.db.result)}@${aws_db_instance.postgres.address}:5432/orbiter"
     ORBITER_NATS_URL     = "nats://nats:4222" # in-cluster service, same namespace
     ORBITER_VALKEY_URL   = "redis://${aws_elasticache_replication_group.valkey.primary_endpoint_address}:6379/0"
   }
