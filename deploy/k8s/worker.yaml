@@ -34,5 +34,7 @@ spec:
             - name: ORBITER_SHUTDOWN_GRACE_S
               value: "35"
           resources:
-            requests: { cpu: 500m, memory: 256Mi }
+            # 250m so a 2-vCPU free-tier node packs ~6 workers; the sim stub
+            # sleeps rather than burns CPU, so density beats per-pod headroom.
+            requests: { cpu: 250m, memory: 256Mi }
             limits: { memory: 512Mi }

@@ -28,3 +28,7 @@ results/raw/
 
 # Terraform plan files
 tfplan
+
+# terraform apply session logs
+apply.log
+apply.log.err

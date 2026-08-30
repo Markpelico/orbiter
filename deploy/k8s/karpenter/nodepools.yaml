@@ -1,8 +1,11 @@
-# Two pools, spot-first with on-demand fallback — the industry-standard
-# pattern. Karpenter tries the weight-100 spot pool; if spot capacity is
-# unavailable it falls back to on-demand rather than leaving pods pending.
-# Both pools label their nodes orbiter/pool=workers, which is the only
-# thing the worker Deployment's nodeSelector asks for.
+# Two pools, spot-first with on-demand fallback. FREE-PLAN EDITION:
+# the account only launches free-tier-eligible types (c7i-flex.large,
+# m7i-flex.large, t3.small verified eligible) and carries 5-vCPU quotas for
+# on-demand and spot separately. The limits below are the engineering answer:
+# spot pool may hold 4 vCPUs (2 nodes), the on-demand fallback 2 vCPUs
+# (1 node), which together with the 2-vCPU system node stays inside quota.
+# Both pools label nodes orbiter/pool=workers — all the worker Deployment
+# ever asks for.
 apiVersion: karpenter.sh/v1
 kind: NodePool
 metadata:
@@ -25,18 +28,15 @@ spec:
         - key: kubernetes.io/arch
           operator: In
           values: ["amd64"]
-        - key: karpenter.k8s.aws/instance-category
+        - key: node.kubernetes.io/instance-type
           operator: In
-          values: ["c", "m"]
-        - key: karpenter.k8s.aws/instance-size
-          operator: In
-          values: ["medium", "large", "xlarge"]
+          values: ["c7i-flex.large", "m7i-flex.large", "t3.small"]
       expireAfter: 24h
   disruption:
     consolidationPolicy: WhenEmptyOrUnderutilized
     consolidateAfter: 30s
   limits:
-    cpu: "32" # hard cost ceiling: the fleet can never exceed 32 vCPUs
+    cpu: "4" # 2 spot nodes max — inside the 5-vCPU spot quota
 ---
 apiVersion: karpenter.sh/v1
 kind: NodePool
@@ -60,15 +60,12 @@ spec:
         - key: kubernetes.io/arch
           operator: In
           values: ["amd64"]
-        - key: karpenter.k8s.aws/instance-category
+        - key: node.kubernetes.io/instance-type
           operator: In
-          values: ["c", "m"]
-        - key: karpenter.k8s.aws/instance-size
-          operator: In
-          values: ["medium", "large"]
+          values: ["c7i-flex.large", "t3.small"]
       expireAfter: 24h
   disruption:
     consolidationPolicy: WhenEmptyOrUnderutilized
     consolidateAfter: 30s
   limits:
-    cpu: "8"
+    cpu: "2" # 1 fallback node — shares the on-demand quota with the system node

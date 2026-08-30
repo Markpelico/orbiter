@@ -14,11 +14,16 @@ module "eks" {
   endpoint_public_access                   = true
   enable_cluster_creator_admin_permissions = true
 
+  # before_compute on the networking addons, or the cluster deadlocks on
+  # first boot: the module installs addons AFTER the node group by default,
+  # but a node cannot go Ready without the CNI — so the node group waits on
+  # a Ready node, the CNI waits on the node group, and nothing ever finishes.
+  # Diagnosed live: node Registered, NotReady, zero pods cluster-wide.
   addons = {
+    vpc-cni                = { before_compute = true }
+    kube-proxy             = { before_compute = true }
+    eks-pod-identity-agent = { before_compute = true }
     coredns                = {}
-    kube-proxy             = {}
-    vpc-cni                = {}
-    eks-pod-identity-agent = {}
     aws-ebs-csi-driver     = {} # NATS JetStream persistence needs EBS volumes
   }
 
@@ -27,12 +32,19 @@ module "eks" {
   # Karpenter cannot schedule itself, so it must live on nodes it does not
   # manage. Workers do NOT run here — Karpenter provisions spot capacity
   # for them (see deploy/k8s/karpenter/).
+  # FREE-PLAN CONSTRAINT: the AWS Free account plan refuses to launch any
+  # instance type that is not free-tier-eligible, and the account carries a
+  # 5-vCPU on-demand quota. Verified eligible in us-east-1 (2026-08):
+  # m7i-flex.large (2c/8GB), c7i-flex.large (2c/4GB), t3.small, t3/t4g.micro.
+  # So: ONE 8GB system node instead of two 4GB ones — same controller
+  # capacity, half the vCPU budget (2 of 5). Fleet quotas live in
+  # deploy/k8s/karpenter/nodepools.yaml.
   eks_managed_node_groups = {
     system = {
-      instance_types = ["t3.medium"]
-      min_size       = 2
-      max_size       = 3
-      desired_size   = 2
+      instance_types = ["m7i-flex.large"]
+      min_size       = 1
+      max_size       = 2
+      desired_size   = 1
     }
   }
 
