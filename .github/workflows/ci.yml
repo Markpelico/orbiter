@@ -35,10 +35,38 @@ jobs:
       - name: Integration tests (real NATS, Postgres, Valkey via Testcontainers)
         run: uv run pytest -m integration -q
 
-  image:
+  # Supply chain: build once, then prove what was built. Same discipline the
+  # HPE scan pipeline applied to other people's code, pointed at our own
+  # artifact: a full SBOM for provenance, and a vulnerability gate that fails
+  # the build on known-fixable criticals. (Kyverno admission enforcement was
+  # deliberately de-scoped — enforcement theater on a one-person cluster;
+  # signing happens at push time in deploy.yml where a registry exists.)
+  supply-chain:
     runs-on: ubuntu-latest
     needs: quality
     steps:
       - uses: actions/checkout@v4
       - name: Build image
         run: docker build -t orbiter:${{ github.sha }} .
+      - name: Generate SBOM (Syft)
+        uses: anchore/sbom-action@v0
+        with:
+          image: orbiter:${{ github.sha }}
+          format: spdx-json
+          artifact-name: orbiter-sbom.spdx.json
+      - name: Vulnerability gate (Trivy)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: orbiter:${{ github.sha }}
+          format: table
+          exit-code: "1"
+          severity: CRITICAL
+          ignore-unfixed: true
+      - name: Report HIGHs (informational, non-blocking)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: orbiter:${{ github.sha }}
+          format: table
+          exit-code: "0"
+          severity: HIGH
+          ignore-unfixed: true

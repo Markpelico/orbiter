@@ -39,6 +39,17 @@ jobs:
           docker push "$ECR_REPO:${{ github.sha }}"
           docker push "$ECR_REPO:latest"
 
+      - name: Sign the image (cosign, keyless)
+        uses: sigstore/cosign-installer@v3
+
+      - name: Cosign sign by digest
+        run: |
+          # Keyless: the signature is bound to this workflow's OIDC identity
+          # (repo + branch), recorded in the Rekor transparency log. No key
+          # to store, no key to leak — the same principle as the CI role.
+          DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' "$ECR_REPO:${{ github.sha }}" | cut -d@ -f2)
+          cosign sign --yes "$ECR_REPO@$DIGEST"
+
       - name: Deploy manifests
         run: |
           aws eks update-kubeconfig --name "$CLUSTER" --region "$AWS_REGION"

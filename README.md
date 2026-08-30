@@ -1,5 +1,7 @@
 # ORBITER
 
+[![ci](https://github.com/Markpelico/orbiter/actions/workflows/ci.yml/badge.svg)](https://github.com/Markpelico/orbiter/actions/workflows/ci.yml)
+
 **A distributed simulation orchestration platform that survives chaos — measured, not claimed.**
 
 ORBITER accepts long-running compute jobs over HTTP, distributes them across an autoscaling
@@ -77,17 +79,60 @@ documented as ADRs in [`docs/adr/`](docs/adr/).
 | 9 | Cloud spend | Spot-first + measured $/1k jobs | FinOps by vibes |
 | 10 | Supply chain | SBOM + signing + admission policy | You ship what you cannot vouch for |
 
-## Running locally
+## Try it in five minutes
 
-Requires Docker.
+Requires Docker. This brings up the entire platform — API, outbox relay,
+workers, DLQ listener, NATS JetStream, Postgres, Valkey — plus its full
+observability cockpit (OpenTelemetry → Tempo + Prometheus + Grafana):
 
 ```
 docker compose up -d --build
+```
+
+Then:
+
+- **Break it on purpose:** open http://localhost:8000/chaos — launch jobs,
+  press the red button to kill a worker mid-job, watch the platform not care.
+- **Watch it breathe:** http://localhost:3001 → Dashboards → ORBITER
+  (throughput, latency percentiles, 429s, DLQ count).
+- **Follow one job across three services:** Grafana → Explore → Tempo →
+  search service `orbiter-api`, open any `POST /jobs` trace.
+- Or the terminal version:
+
+```
 curl -X POST localhost:8000/jobs \
   -H 'Idempotency-Key: demo-1' -H 'Content-Type: application/json' \
   -d '{"duration_ms": 2000, "failure_rate": 0.2}'
-curl localhost:8000/jobs/<id>       # watch it retry and finish, with full event log
+curl localhost:8000/jobs/<id>       # the full audit trail: retries and all
 ```
+
+## Field notes: what the chaos button caught
+
+The best evidence this platform is real is what its own chaos tooling found —
+two layered defects invisible across 32,131 clean jobs
+([RESULTS.md](RESULTS.md) has the full audit trails):
+
+1. **Lockstep starvation.** Every timeout was the same 30 seconds, so a killed
+   job's redeliveries kept arriving at the exact instant the previous cycle's
+   claim expired — five no-progress deliveries, straight to the DLQ. Fix:
+   desynchronized TTLs and jittered retries.
+2. **The missing recovery transition.** A dead worker leaves its job RUNNING —
+   nobody who knows it died is alive to say so. Redelivery *is* the
+   lost-worker detector, but `apply(RUNNING, started)` was illegal and crashed
+   every replacement worker. The first bug had been shielding the second.
+
+Both casualties were caught by the DLQ and replayed to success; the fixed
+system recovers a murdered mid-flight job in **30 seconds — the AckWait
+floor** — and the 32,131-job integrity sweep shows **zero double-completions**.
+
+## Deliberately not built
+
+Scope discipline is a feature ([the ADRs](docs/adr/) hold the full arguments):
+no user accounts, no custom frontend beyond one raw chaos page, no
+multi-region, no service mesh, no Temporal (ADR-0003 lists exactly what it
+would have replaced — knowing that list is the point of building it once),
+no Kyverno admission enforcement and no Infracost PR comments (cut on the
+de-scope ladder and recorded here, which is itself the judgment signal).
 
 ## Development
 
