@@ -65,7 +65,15 @@ data "aws_iam_policy_document" "ci_trust" {
     condition {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["repo:${var.github_repo}:ref:refs/heads/main"]
+      # GitHub's 2026 OIDC format embeds numeric owner/repo IDs in sub
+      # (repo:owner@id/name@id:ref:...) — observed live when the classic
+      # format stopped matching. Accept both; the ID-pinned form is the
+      # stronger claim (immune to name reuse), the classic form covers any
+      # rollback of the format.
+      values = [
+        "repo:${var.github_repo}:ref:refs/heads/main",
+        "repo:Markpelico@183856734/orbiter@1350307433:ref:refs/heads/main",
+      ]
     }
   }
 }
