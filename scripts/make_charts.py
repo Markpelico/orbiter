@@ -25,7 +25,7 @@ from pathlib import Path
 import matplotlib
 
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt  # noqa: E402
+import matplotlib.pyplot as plt
 
 # Validated palette (dataviz reference instance, light mode)
 SURFACE = "#fcfcfb"
@@ -76,12 +76,22 @@ def chart_latency(summary: dict, out: Path) -> None:
     )
     for name in ("p50", "p95", "p99"):
         ax.plot(
-            RATES, series[name], color=RAMP[name], linewidth=2, marker="o", markersize=5,
+            RATES,
+            series[name],
+            color=RAMP[name],
+            linewidth=2,
+            marker="o",
+            markersize=5,
             label=name,
         )
         ax.annotate(
-            name, (RATES[-1], series[name][-1]), xytext=(8, 0),
-            textcoords="offset points", va="center", fontsize=9, color=INK_2,
+            name,
+            (RATES[-1], series[name][-1]),
+            xytext=(8, 0),
+            textcoords="offset points",
+            va="center",
+            fontsize=9,
+            color=INK_2,
         )
     ax.set_xlabel("offered load (submissions / second)", fontsize=9.5, color=INK_2)
     ax.set_ylabel("latency (ms)", fontsize=9.5, color=INK_2)
@@ -93,7 +103,9 @@ def chart_latency(summary: dict, out: Path) -> None:
     print(f"wrote {out}")
 
 
-def prom_range(base: str, query: str, start: int, end: int, step: int = 5) -> list[tuple[float, float]]:
+def prom_range(
+    base: str, query: str, start: int, end: int, step: int = 5
+) -> list[tuple[float, float]]:
     url = f"{base}/api/v1/query_range?" + urllib.parse.urlencode(
         {"query": query, "start": start, "end": end, "step": step}
     )
@@ -122,8 +134,13 @@ def chart_timeline(base: str, start: int, end: int, out: Path) -> None:
         ys = [v for _, v in points]
         ax.plot(xs, ys, color=CAT[name], linewidth=2, label=name)
         ax.annotate(
-            name, (xs[-1], ys[-1]), xytext=(8, 0), textcoords="offset points",
-            va="center", fontsize=9, color=INK_2,
+            name,
+            (xs[-1], ys[-1]),
+            xytext=(8, 0),
+            textcoords="offset points",
+            va="center",
+            fontsize=9,
+            color=INK_2,
         )
     ax.set_xlabel("minutes since test start", fontsize=9.5, color=INK_2)
     ax.set_ylabel("jobs / second", fontsize=9.5, color=INK_2)
