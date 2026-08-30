@@ -14,6 +14,9 @@ class Settings(BaseSettings):
 
     stream_name: str = "ORBITER_JOBS"
     subject_jobs: str = "orbiter.jobs"
+    # Plain NATS (not JetStream) broadcast; workers join a queue group so a
+    # chaos message reaches exactly ONE random worker. See ADR-0007.
+    subject_chaos: str = "orbiter.chaos"
     consumer_durable: str = "workers"
     dlq_stream_name: str = "ORBITER_DLQ"
     subject_dlq: str = "orbiter.dlq"
@@ -36,9 +39,14 @@ class Settings(BaseSettings):
     relay_poll_interval_s: float = 0.2
     relay_batch_size: int = 100
 
-    # Idempotent execution guard
+    # Idempotent execution guard.
+    # lease/claim TTL is DELIBERATELY shorter than ack_wait_s: when every
+    # timeout in the system is the same number, redeliveries arrive at the
+    # exact millisecond the previous cycle's claim expires, and the job can
+    # starve in lockstep to the DLQ. Found live by the CHAOS button
+    # (RESULTS.md, 2026-08-30). Keep a >= 10s margin.
     exec_guard_ttl_s: int = 3600
-    lease_ttl_s: int = 30
+    lease_ttl_s: int = 20
 
     # Observability. Empty endpoint = telemetry entirely off (tests, local
     # scripts). Point at an OTLP/HTTP collector to light it up.

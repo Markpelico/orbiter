@@ -41,6 +41,15 @@ class TestLegalPaths:
             assert state is S.QUEUED
         assert apply(apply(state, E.STARTED), E.COMPLETED) is S.SUCCEEDED
 
+    def test_lost_worker_restart_is_legal(self) -> None:
+        """A worker dies mid-job leaving the state RUNNING; the redelivery's
+        STARTED is the recovery, not corruption. The CHAOS button found the
+        version of this machine that disagreed."""
+        state = apply(apply(apply(None, E.SUBMITTED), E.ENQUEUED), E.STARTED)
+        assert state is S.RUNNING
+        assert apply(state, E.STARTED) is S.RUNNING  # restart after loss
+        assert apply(apply(state, E.STARTED), E.COMPLETED) is S.SUCCEEDED
+
     def test_dead_letter_and_replay(self) -> None:
         state = apply(apply(apply(None, E.SUBMITTED), E.ENQUEUED), E.STARTED)
         state = apply(state, E.DEAD_LETTERED)

@@ -1,0 +1,22 @@
+# Chaos Mesh: the kill shot. Skew one worker's clock +90s — past every TTL it
+# believes in. A naive TTL lock double-executes under this; ORBITER's fencing
+# tokens reject the stale writer at the data (see ADR-0005 and
+# tests/unit/test_fencing.py::test_paused_holder_is_fenced_out, which is this
+# experiment with a fake clock).
+#
+# Verification query (zero rows = fencing held):
+#   SELECT job_id FROM job_events WHERE event = 'completed'
+#   GROUP BY job_id HAVING count(*) > 1;
+apiVersion: chaos-mesh.org/v1alpha1
+kind: TimeChaos
+metadata:
+  name: skew-one-worker
+  namespace: orbiter
+spec:
+  mode: one
+  selector:
+    namespaces: [orbiter]
+    labelSelectors:
+      app: worker
+  timeOffset: "90s"
+  duration: 120s

@@ -12,10 +12,12 @@ import asyncio
 import contextlib
 import json
 import logging
+import os
 import random
 import signal
 import socket
 import uuid
+from collections.abc import Callable
 from typing import Any
 
 import nats
@@ -24,6 +26,7 @@ from nats.js.api import AckPolicy, ConsumerConfig, RetentionPolicy, StreamConfig
 from orbiter.config import Settings
 from orbiter.db import repo
 from orbiter.domain.model import EventType
+from orbiter.domain.state_machine import IllegalTransition
 from orbiter.kv.valkey import ValkeyKV
 from orbiter.leases.fencing import LeaseManager, StaleLeaseError
 from orbiter.telemetry import context_from, init_telemetry, meter, tracer
@@ -65,6 +68,11 @@ class Worker:
         self.worker_id = f"{socket.gethostname()}-{uuid.uuid4().hex[:8]}"
         self.shutdown = asyncio.Event()
         self.rng = random.Random()
+        # Injectable so tests can observe the chaos handler without dying.
+        # os._exit, not sys.exit: the POINT is no cleanup, no graceful
+        # shutdown, no lease release — the worker just vanishes, exactly like
+        # a segfault or an OOM kill, and the platform must cope.
+        self._die: Callable[[int], None] = os._exit
         m = meter()
         self.jobs_completed = m.create_counter(
             "orbiter.jobs.completed", description="Jobs finished successfully"
@@ -85,7 +93,7 @@ class Worker:
         await repo.apply_schema(pool)
         kv = ValkeyKV(settings.valkey_url)
         guard = ExecutionGuard(
-            kv, claim_ttl_s=settings.ack_wait_s, done_ttl_s=settings.exec_guard_ttl_s
+            kv, claim_ttl_s=settings.lease_ttl_s, done_ttl_s=settings.exec_guard_ttl_s
         )
         leases = LeaseManager(kv, ttl_s=settings.lease_ttl_s)
         nc = await nats.connect(settings.nats_url)
@@ -94,6 +102,7 @@ class Worker:
         sub = await js.pull_subscribe(
             settings.subject_jobs, durable=settings.consumer_durable, stream=settings.stream_name
         )
+        await nc.subscribe(settings.subject_chaos, queue="workers", cb=self._on_chaos_message)
         log.info("worker %s started", self.worker_id)
         try:
             while not self.shutdown.is_set():
@@ -172,14 +181,19 @@ class Worker:
             await msg.ack()
             return
         if claim is ClaimResult.IN_PROGRESS:
+            # Jittered short delay, NOT a clean multiple of any TTL: aligned
+            # retries were how the chaos-killed job starved to the DLQ.
             log.info("job %s already executing elsewhere; delaying redelivery", job_id)
-            await msg.nak(delay=settings.ack_wait_s)
+            await msg.nak(delay=self.rng.uniform(4.0, 9.0))
             return
 
         lease = await leases.acquire(str(job_id), self.worker_id)
         if lease is None:
+            # This branch was silent once, which made the lockstep starvation
+            # invisible. Every no-progress path logs, always.
+            log.info("job %s lease held elsewhere; delaying redelivery", job_id)
             await guard.release_claim(str(job_id), delivery)
-            await msg.nak(delay=settings.lease_ttl_s)
+            await msg.nak(delay=self.rng.uniform(4.0, 9.0))
             return
 
         try:
@@ -235,8 +249,25 @@ class Worker:
             # A newer holder owns this job now; our writes were rejected at the
             # data. Drop the message without acking — their delivery wins.
             log.warning("job %s: stale lease detected, standing down", job_id)
+        except IllegalTransition as exc:
+            # The audit trail says this job is somewhere this delivery cannot
+            # take it (e.g. already terminal after a done-marker expired).
+            # The trail is the authority: stop redelivering, change nothing.
+            # An uncaught version of this crashed the whole worker per
+            # delivery — a state-machine surprise must never cost the fleet.
+            log.warning("job %s: delivery obsolete (%s); terminating message", job_id, exc)
+            await guard.release_claim(str(job_id), delivery)
+            await msg.term()
         finally:
             await leases.release(lease)
+
+    async def _on_chaos_message(self, msg: Any) -> None:
+        """The CHAOS button's landing site. The queue group means exactly one
+        worker receives each chaos message; that worker dies instantly,
+        mid-whatever-it-was-doing. Recovery is the platform's problem — which
+        is the entire demonstration."""
+        log.critical("CHAOS: worker %s killed mid-flight", self.worker_id)
+        self._die(1)
 
     def request_shutdown(self) -> None:
         log.info("SIGTERM received: finishing in-flight work, taking no more")

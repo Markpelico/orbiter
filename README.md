@@ -34,7 +34,12 @@ KEDA scale-to-zero, Karpenter spot fleet, load curves.
 - [x] OpenTelemetry end to end: ONE trace per job across api → relay → worker (context
       rides inside the message), RED metrics, Grafana + Tempo + Prometheus in compose
 - [ ] SLO burn-rate alerts, exemplars, k6 load curves (Phase 4 continues)
-- [ ] Chaos Mesh: pod kill, network partition, TimeChaos clock skew (Phase 5)
+- [x] The CHAOS button (`GET /chaos`): kills a random worker mid-job via a queue-group
+      message (ADR-0007) — and its first live sessions found two real defects
+      (synchronized-timeout starvation, missing lost-worker recovery transition),
+      both DLQ-caught, fixed, and regression-tested. Recovery now: 30s, the AckWait floor
+- [ ] Chaos Mesh on EKS: pod kill, broker partition, TimeChaos clock skew + recordings
+      (Phase 5 cloud half, next apply day)
 - [ ] Supply chain: SBOM, Trivy gate, cosign signing, Kyverno admission (Phase 6)
 
 ## Architecture

@@ -228,6 +228,28 @@ async def list_jobs_by_state(pool: asyncpg.Pool, state: JobState) -> list[dict[s
     ]
 
 
+async def list_recent_jobs(pool: asyncpg.Pool, limit: int = 25) -> list[dict[str, Any]]:
+    """The chaos page's window: the newest jobs and where they stand."""
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT id, state, attempts, created_at, updated_at
+            FROM jobs ORDER BY created_at DESC LIMIT $1
+            """,
+            limit,
+        )
+    return [
+        {
+            "id": str(r["id"]),
+            "state": r["state"],
+            "attempts": r["attempts"],
+            "created_at": r["created_at"].isoformat(),
+            "updated_at": r["updated_at"].isoformat(),
+        }
+        for r in rows
+    ]
+
+
 async def replay_events(pool: asyncpg.Pool, job_id: uuid.UUID) -> list[JobEvent]:
     async with pool.acquire() as conn:
         rows = await conn.fetch(

@@ -11,13 +11,17 @@ row atomically — the dual-write problem is solved here or nowhere.
 # create_app: `Depends(get_pool)` lives in the factory's local scope, which
 # get_type_hints cannot see, and the params silently degrade to query params.
 
+import contextlib
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from importlib import resources
 from typing import Annotated, Any
 
 import asyncpg
+import nats
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
 from orbiter.api.admission import AdmissionController
@@ -61,9 +65,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.admission = AdmissionController(
             capacity=cfg.admission_capacity, retry_after_s=cfg.admission_retry_after_s
         )
+        # Best-effort broker connection for the chaos endpoint; the API's
+        # core job (submit/status) works through the outbox regardless.
+        app.state.nats = None
+        with contextlib.suppress(Exception):
+            app.state.nats = await nats.connect(cfg.nats_url, connect_timeout=3)
         try:
             yield
         finally:
+            if app.state.nats is not None:
+                await app.state.nats.close()
             await pool.close()
 
     app = FastAPI(title="ORBITER", version="0.1.0", lifespan=lifespan)
@@ -140,6 +151,25 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if state is None:
             raise HTTPException(status_code=404, detail="no such job")
         return {"id": job_id, "state": state.value}
+
+    @app.get("/jobs")
+    async def recent_jobs(pool: Annotated[asyncpg.Pool, Depends(get_pool)]) -> list[dict[str, Any]]:
+        return await repo.list_recent_jobs(pool)
+
+    @app.post("/chaos/kill-worker")
+    async def chaos_kill_worker(request: Request) -> dict[str, str]:
+        """Kill one random worker, mid-job, no cleanup. The queue group on
+        the chaos subject picks the victim; recovery is the demo."""
+        nc = request.app.state.nats
+        if nc is None:
+            raise HTTPException(status_code=503, detail="no broker connection")
+        await nc.publish(cfg.subject_chaos, b"die")
+        return {"chaos": "one worker is about to have a very bad day"}
+
+    @app.get("/chaos", include_in_schema=False)
+    async def chaos_page() -> HTMLResponse:
+        html = (resources.files("orbiter.api") / "chaos.html").read_text(encoding="utf-8")
+        return HTMLResponse(html)
 
     @app.get("/healthz")
     async def healthz(pool: Annotated[asyncpg.Pool, Depends(get_pool)]) -> dict[str, str]:

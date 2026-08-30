@@ -1,0 +1,23 @@
+# Chaos Mesh: partition the workers from the broker for 60 seconds. Expected
+# behavior: in-flight jobs stall, AckWait expires, redeliveries queue up; when
+# the partition heals the fleet drains the burst. No job lost, no job doubled.
+apiVersion: chaos-mesh.org/v1alpha1
+kind: NetworkChaos
+metadata:
+  name: partition-workers-from-broker
+  namespace: orbiter
+spec:
+  action: partition
+  mode: all
+  selector:
+    namespaces: [orbiter]
+    labelSelectors:
+      app: worker
+  direction: both
+  target:
+    mode: all
+    selector:
+      namespaces: [orbiter]
+      labelSelectors:
+        app: nats
+  duration: 60s

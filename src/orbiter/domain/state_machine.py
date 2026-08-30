@@ -37,6 +37,13 @@ _TRANSITIONS: dict[JobState, dict[EventType, JobState]] = {
         EventType.FAILED: JobState.FAILED,
         EventType.REQUEUED: JobState.QUEUED,
         EventType.DEAD_LETTERED: JobState.DEAD_LETTER,
+        # A lost worker leaves the job RUNNING forever — nobody who knows it
+        # died is alive to say so. At-least-once redelivery IS the lost-worker
+        # detector, and the redelivery's STARTED is the recovery. Without this
+        # transition every redelivery-after-death crashes on "illegal
+        # transition" and the job starves to the DLQ (found live by the CHAOS
+        # button, 2026-08-30: five crashes, 30s apart, RESULTS.md).
+        EventType.STARTED: JobState.RUNNING,
     },
     JobState.DEAD_LETTER: {
         EventType.REPLAYED: JobState.QUEUED,

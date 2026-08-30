@@ -1,0 +1,71 @@
+<!doctype html>
+<!-- The one raw HTML page the spec allows. Grafana is the dashboard; this is
+     the trigger. Deliberately spartan: the platform is the product. -->
+<html>
+<head>
+<meta charset="utf-8">
+<title>ORBITER CHAOS</title>
+<style>
+  body { background:#0d0d0d; color:#c3c2b7; font-family:ui-monospace,Consolas,monospace;
+         max-width:64rem; margin:2rem auto; padding:0 1rem; }
+  h1 { color:#fff; font-size:1.2rem; letter-spacing:.2em; }
+  button { font:inherit; padding:.7rem 1.4rem; margin:0 .6rem .6rem 0; cursor:pointer;
+           background:#1a1a19; color:#c3c2b7; border:1px solid #383835; }
+  #chaos { background:#5c1210; color:#fff; border-color:#d03b3b; font-weight:bold; }
+  #chaos:hover { background:#d03b3b; }
+  table { border-collapse:collapse; width:100%; margin-top:1rem; font-size:.85rem; }
+  td, th { text-align:left; padding:.25rem .6rem; border-bottom:1px solid #2c2c2a; }
+  th { color:#898781; font-weight:normal; }
+  .queued { color:#eda100; } .running { color:#3987e5; }
+  .succeeded { color:#0ca30c; } .failed { color:#e34948; } .dead_letter { color:#d55181; }
+  #log { margin-top:1rem; font-size:.8rem; color:#898781; white-space:pre-line; }
+</style>
+</head>
+<body>
+<h1>ORBITER // CHAOS CONSOLE</h1>
+<p>Launch work, then kill a worker mid-job. Watch the platform not care.</p>
+<button id="launch">LAUNCH 10 JOBS (4s each)</button>
+<button id="chaos">&#9760; CHAOS &mdash; KILL A RANDOM WORKER</button>
+<table>
+  <thead><tr><th>job</th><th>state</th><th>attempts</th><th>updated</th></tr></thead>
+  <tbody id="jobs"></tbody>
+</table>
+<div id="log"></div>
+<script>
+  const log = (m) => {
+    const el = document.getElementById("log");
+    el.textContent = `${new Date().toISOString().slice(11,19)}  ${m}\n` + el.textContent;
+  };
+
+  document.getElementById("launch").onclick = async () => {
+    const batch = Date.now();
+    for (let i = 0; i < 10; i++) {
+      await fetch("/jobs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Idempotency-Key": `chaos-${batch}-${i}` },
+        body: JSON.stringify({ duration_ms: 4000, failure_rate: 0 }),
+      });
+    }
+    log("launched 10 jobs");
+  };
+
+  document.getElementById("chaos").onclick = async () => {
+    const res = await fetch("/chaos/kill-worker", { method: "POST" });
+    log(res.ok ? "CHAOS: a worker just died mid-job" : `chaos failed: ${res.status}`);
+  };
+
+  async function refresh() {
+    try {
+      const jobs = await (await fetch("/jobs")).json();
+      document.getElementById("jobs").innerHTML = jobs.map((j) => `
+        <tr><td>${j.id.slice(0, 8)}</td>
+            <td class="${j.state}">${j.state}</td>
+            <td>${j.attempts}</td>
+            <td>${j.updated_at.slice(11, 19)}</td></tr>`).join("");
+    } catch (e) { /* api restarting; keep polling */ }
+  }
+  setInterval(refresh, 1000);
+  refresh();
+</script>
+</body>
+</html>

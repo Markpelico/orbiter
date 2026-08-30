@@ -114,6 +114,9 @@ services:
     environment: *env
     # SIGTERM grace: compose default is 10s; give the worker room to finish.
     stop_grace_period: 30s
+    # The CHAOS button hard-kills workers; compose plays Kubernetes and
+    # brings the replacement up (on EKS the Deployment does this).
+    restart: unless-stopped
     depends_on:
       postgres:
         condition: service_healthy

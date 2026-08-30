@@ -1,0 +1,15 @@
+# Chaos Mesh: kill one random worker pod. The cluster-level sibling of the
+# CHAOS button (which kills the process from inside — ADR-0007). Requires
+# Chaos Mesh installed (see deploy/chaos/README.md).
+apiVersion: chaos-mesh.org/v1alpha1
+kind: PodChaos
+metadata:
+  name: kill-random-worker
+  namespace: orbiter
+spec:
+  action: pod-kill
+  mode: one
+  selector:
+    namespaces: [orbiter]
+    labelSelectors:
+      app: worker
