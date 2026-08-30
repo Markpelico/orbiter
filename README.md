@@ -10,12 +10,14 @@ partition, and clocks skew. It exists to demonstrate — with charts, traces, an
 experiments — *why* distributed systems need idempotency, backpressure, fencing tokens,
 and graceful shutdown.
 
-![ORBITER: 32,131 jobs with zero duplicate executions, chaos included. A job's lifecycle drawn as an orbit that terminates at completed; the only closed loop is the red failure path, where a worker killed mid-job is redelivered to the queue and recovers in 30 seconds](docs/assets/orbiter-board.png)
+![ORBITER: kill a worker mid-job and the job still finishes, exactly once. 32,131 jobs with zero duplicate executions, chaos included; 30-second recovery after a mid-job kill; 65-second cold start from an empty fleet; sub-10ms submit p99 at 200 jobs per second](docs/assets/orbiter-board.png)
 
 Every number on the board is reproducible from this repo: the integration suite
-and `make load` regenerate them, [RESULTS.md](RESULTS.md) keeps the ledger.
-(Project boards on my portfolio are designed per project: BASTION is a grid
-blueprint, ORBITER is an orbit. Deliberate, not a template.)
+and `make load` regenerate them, [RESULTS.md](RESULTS.md) keeps the ledger, and
+the board itself regenerates from [docs/assets/board-source.html](docs/assets/board-source.html)
+via headless Chrome whenever the numbers move. (Project boards on my portfolio
+are designed per project, each visual world derived from what the project is.
+Deliberate, not a template.)
 
 ## Status
 
